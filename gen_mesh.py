@@ -53,6 +53,7 @@ flags.DEFINE_integer(
 device = "cuda" if torch.cuda.is_available() else "cpu"
 torch.autograd.set_detect_anomaly(True)
 
+@torch.no_grad()
 def marching_cubes(
     fn,
     c1,

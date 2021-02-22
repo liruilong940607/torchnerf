@@ -266,6 +266,7 @@ def makedirs(pth):
         os.makedirs(pth, exist_ok=True)
 
 
+@torch.no_grad()
 def eval_points(fn, points, chunk=720720, to_cpu=True):
     """Evaluate at given points (in test mode).
     Currently not supporting viewdirs.
