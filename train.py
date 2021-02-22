@@ -17,8 +17,6 @@
 """Training script for Nerf."""
 
 import os
-# Get rid of ugly TF logs
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 import functools
 import gc
@@ -34,7 +32,6 @@ from absl import flags
 # import jax.numpy as jnp
 import numpy as np
 import torch
-from torch.utils.tensorboard import SummaryWriter
 
 from torchnerf.nerf import datasets
 from torchnerf.nerf import models
@@ -132,7 +129,7 @@ def main(unused_argv):
 
     # Resume training step of the last checkpoint.
     init_step = state.step + 1
-    summary_writer = SummaryWriter(FLAGS.train_dir)
+    summary_writer = torch.utils.tensorboard.SummaryWriter(FLAGS.train_dir)
 
     stats_trace = []
     reset_timer = True

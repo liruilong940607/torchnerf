@@ -307,7 +307,7 @@ def piecewise_constant_pdf(bins, weights, num_samples, randomized):
                        dtype=cdf.dtype, device=cdf.device)
     else:
         # Match the behavior of torch.rand() by spanning [0, 1-eps].
-        u = torch.linspace(0.0, 1.0 - torch.finfo.eps, num_samples, 
+        u = torch.linspace(0.0, 1.0 - torch.finfo().eps, num_samples, 
                            dtype=cdf.dtype, device=cdf.device)
         u = u.expand(list(cdf.shape[:-1]) + [num_samples])
 

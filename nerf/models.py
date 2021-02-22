@@ -44,20 +44,26 @@ def get_model_state(args, device="cpu", restore=True):
     optimizer = torch.optim.Adam(model.parameters(), 
                                  lr=args.lr_init, 
                                  weight_decay=args.weight_decay_mult)
-    step = 0
+    state = utils.TrainState(optimizer=optimizer, step=0)
     if restore:
-        ckpt_paths = sorted(
-            glob.glob(os.path.join(args.train_dir, "*.ckpt")))
-        if len(ckpt_paths) > 0:
-            ckpt_path = ckpt_paths[-1]
-            ckpt = torch.load(ckpt_path, map_location=torch.device('cpu'))
-            model.load_state_dict(ckpt["model"])
-            optimizer.load_state_dict(ckpt["optimizer"])
-            step = ckpt["step"]
-            print (f"* restore ckpt from {ckpt_path}.")
-    state = utils.TrainState(optimizer=optimizer, step=step)
+        model, state = restore_model_state(args, model, state)
     return model, state
 
+
+def restore_model_state(args, model, state):
+    """
+    Helper for restoring checkpoint.
+    """
+    ckpt_paths = sorted(
+        glob.glob(os.path.join(args.train_dir, "*.ckpt")))
+    if len(ckpt_paths) > 0:
+        ckpt_path = ckpt_paths[-1]
+        ckpt = torch.load(ckpt_path, map_location=torch.device('cpu'))
+        model.load_state_dict(ckpt["model"])
+        state.optimizer.load_state_dict(ckpt["optimizer"])
+        state = utils.TrainState(optimizer=state.optimizer, step=ckpt["step"])
+        print (f"* restore ckpt from {ckpt_path}.")
+    return model, state
 
 class NerfModel(nn.Module):
     """Nerf NN Model with both coarse and fine MLPs."""

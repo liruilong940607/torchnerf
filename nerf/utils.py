@@ -627,18 +627,6 @@ def get_render_pfn(model, randomized):
 
 def get_eval_points_pfn(model, raw_rgb, coarse=False):
     eval_method = model.eval_points_raw if raw_rgb else model.eval_points
-
-    def eval_points_fn(variables, points, viewdirs):
-        return jax.lax.all_gather(
-            model.apply(variables, points, viewdirs, coarse,
-                method=eval_method),
-            axis_name="batch",
-        )
-
-    return jax.pmap(
-        eval_points_fn,
-        in_axes=(None, 0, 0 if model.use_viewdirs else None),
-        donate_argnums=(1,),
-        axis_name="batch",
-    )
-
+    def eval_points_fn(points, viewdirs):
+        return eval_method(points, viewdirs, coarse=coarse)
+    return eval_points_fn
