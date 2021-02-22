@@ -17,19 +17,13 @@
 """Evaluation script for Nerf."""
 
 import os
-# Get rid of ugly TF logs
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 import functools
 from os import path
 
 from absl import app
 from absl import flags
-# import flax
-# from flax.metrics import tensorboard
-# from flax.training import checkpoints
-# import jax
-# from jax import random
+
 import torch
 import numpy as np
 
@@ -45,7 +39,7 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 torch.autograd.set_detect_anomaly(True)
 
 def main(unused_argv):
-    # rng = random.PRNGKey(20200823)
+    utils.set_random_seed(20210222)
 
     utils.update_flags(FLAGS)
     utils.check_flags(FLAGS)

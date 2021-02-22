@@ -235,6 +235,11 @@ def check_flags(args, require_data=True, require_batch_size_div=False):
         raise ValueError("Batch size must be divisible by the number of devices.")
 
 
+def set_random_seed(seed):
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+
+
 def open_file(pth, mode="r"):
     if not INTERNAL:
         pth = path.expanduser(pth)

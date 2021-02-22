@@ -23,25 +23,17 @@ import gc
 import time
 from absl import app
 from absl import flags
-# import flax
-# from flax.metrics import tensorboard
-# from flax.training import checkpoints
-# import jax
-# from jax import config
-# from jax import random
-# import jax.numpy as jnp
+
 import numpy as np
 import torch
 
 from torchnerf.nerf import datasets
 from torchnerf.nerf import models
 from torchnerf.nerf import utils
-# from jaxnerf.nerf.utils import host0_print as h0print
 
 FLAGS = flags.FLAGS
 
 utils.define_flags()
-# config.parse_flags_with_absl()
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 torch.autograd.set_detect_anomaly(True)
@@ -99,7 +91,7 @@ def train_step(model, state, batch, lr):
 
 
 def main(unused_argv):
-    # TODO fix torch/numpy random seed for reproducibility
+    utils.set_random_seed(20210222)
 
     utils.update_flags(FLAGS)
     utils.check_flags(FLAGS, require_batch_size_div=False)
