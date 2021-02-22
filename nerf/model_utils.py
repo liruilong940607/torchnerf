@@ -290,7 +290,7 @@ def piecewise_constant_pdf(bins, weights, num_samples, randomized):
     # Compute the PDF and CDF for each weight vector, while ensuring that the CDF
     # starts with exactly 0 and ends with exactly 1.
     pdf = weights / weight_sum
-    cdf = torch.clamp(torch.cumsum(pdf[Ellipsis, :-1], dim=-1), 1)
+    cdf = torch.clamp(torch.cumsum(pdf[Ellipsis, :-1], dim=-1), max=1)
     cdf = torch.cat(
         [
             torch.zeros(list(cdf.shape[:-1]) + [1], dtype=cdf.dtype, device=cdf.device),
