@@ -26,7 +26,9 @@ import torch.nn as nn
 
 def dense_layer(in_features, out_features):
     layer = nn.Linear(in_features, out_features)
+    # The initialization matters!
     nn.init.xavier_uniform_(layer.weight)
+    nn.init.zeros_(layer.bias)
     return layer
 
 
@@ -166,6 +168,7 @@ def sample_along_rays(
         z_vals = 1.0 / (1.0 / near * (1.0 - t_vals) + 1.0 / far * t_vals)
     else:
         z_vals = near * (1.0 - t_vals) + far * t_vals
+        
     if randomized:
         mids = 0.5 * (z_vals[Ellipsis, 1:] + z_vals[Ellipsis, :-1])
         upper = torch.cat([mids, z_vals[Ellipsis, -1:]], -1)
@@ -175,6 +178,7 @@ def sample_along_rays(
     else:
         # Broadcast z_vals to make the returned shape consistent.
         z_vals = z_vals.expand([batch_size, num_samples])
+        
     coords = cast_rays(z_vals, origins, directions)
     return z_vals, coords
 
@@ -302,10 +306,10 @@ def piecewise_constant_pdf(bins, weights, num_samples, randomized):
         u = torch.rand(list(cdf.shape[:-1]) + [num_samples], 
                        dtype=cdf.dtype, device=cdf.device)
     else:
-        # Match the behavior of random.uniform() by spanning [0, 1-eps].
+        # Match the behavior of torch.rand() by spanning [0, 1-eps].
         u = torch.linspace(0.0, 1.0 - torch.finfo.eps, num_samples, 
                            dtype=cdf.dtype, device=cdf.device)
-        u.expand(list(cdf.shape[:-1]) + [num_samples])
+        u = u.expand(list(cdf.shape[:-1]) + [num_samples])
 
     # Identify the location in `cdf` that corresponds to a random sample.
     # The final `True` index in `mask` will be the start of the sampled interval.
@@ -368,7 +372,7 @@ def add_gaussian_noise(raw, noise_std, randomized):
       raw + noise: torch.tensor(float32), with the same shape as `raw`.
     """
     if (noise_std is not None) and randomized:
-        return raw + torch.rand(
+        return raw + torch.randn(
             raw.shape, dtype=raw.dtype, device=raw.device) * noise_std
     else:
         return raw

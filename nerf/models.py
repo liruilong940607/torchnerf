@@ -84,7 +84,7 @@ class NerfModel(nn.Module):
         max_deg_point: int = 10,  # The maximum degree of positional encoding for positions.
         deg_view: int = 4,  # The degree of positional encoding for viewdirs.
         lindisp: bool = False,  # If True, sample linearly in disparity rather than in depth.
-        rgb_activation: Callable[Ellipsis, Any] = torch.sigmoid,  # Output RGB activation.
+        rgb_activation: Callable[Ellipsis, Any] = nn.Sigmoid(),  # Output RGB activation.
         sigma_activation: Callable[Ellipsis, Any] = nn.ReLU(),  # Output sigma activation.
         legacy_posenc_order: bool = False,  # Keep the same ordering as the original tf code.
     ):

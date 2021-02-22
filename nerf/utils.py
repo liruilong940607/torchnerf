@@ -289,8 +289,8 @@ def eval_points(fn, points, chunk=720720, to_cpu=True):
         rgbs = np.concatenate(rgbs, axis=0)
         sigmas = np.concatenate(sigmas, axis=0)
     else:
-        rgbs = torch.cat(rgbs, axis=0)
-        sigmas = torch.cat(sigmas, axis=0)
+        rgbs = torch.cat(rgbs, dim=0)
+        sigmas = torch.cat(sigmas, dim=0)
     return rgbs, sigmas
 
 
@@ -319,7 +319,7 @@ def render_image(render_fn, rays, normalize_disp, chunk=8192):
         chunk_results = render_fn(chunk_rays)[-1]
         results.append(chunk_results)
         # pylint: enable=cell-var-from-loop
-    rgb, disp, acc = [torch.cat(r, axis=0) for r in zip(*results)]
+    rgb, disp, acc = [torch.cat(r, dim=0) for r in zip(*results)]
     # Normalize disp for visualization for ndc_rays in llff front-facing scenes.
     if normalize_disp:
         disp = (disp - disp.min()) / (disp.max() - disp.min())
