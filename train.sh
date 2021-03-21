@@ -14,21 +14,20 @@
 
 #!/bin/bash
 CONFIG=$1
-DATA_ROOT=$2
-ROOT_DIR=/tmp/torchnerf/"$CONFIG"
-if [ $CONFIG == "llff" ]
-then
-  SCENES="room fern leaves fortress orchids flower trex horns"
-  DATA_FOLDER="nerf_llff_data"
+SCENE=$2
+DATA_ROOT=$3
+ROOT_DIR=./torchnerf_ckpt/"$CONFIG"
+
+if [[ "lego chair drums ficus hotdog materials mic ship" =~ "$SCENE" ]]; then
+    DATA_FOLDER="nerf_synthetic"
+elif [[ "pinecone vasedeck" =~ "$SCENE" ]]; then
+    DATA_FOLDER="nerf_real_360"
 else
-  SCENES="lego chair drums ficus hotdog materials mic ship"
-  DATA_FOLDER="nerf_synthetic"
+    DATA_FOLDER="nerf_llff_data"
 fi
 
-# launch training jobs for all scenes.
-for scene in $SCENES; do
-  python -m torchnerf.train \
-    --data_dir="$DATA_ROOT"/"$DATA_FOLDER"/"$scene" \
-    --train_dir="$ROOT_DIR"/"$scene" \
+# launch training job.
+python -m torchnerf.train \
+    --data_dir="$DATA_ROOT"/"$DATA_FOLDER"/"$SCENE" \
+    --train_dir="$ROOT_DIR"/"$SCENE" \
     --config=configs/"$CONFIG"
-done

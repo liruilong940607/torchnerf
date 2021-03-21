@@ -18,15 +18,12 @@
 INTERNAL = False  # pylint: disable=g-statement-before-imports
 import json
 import os
-from os import path
-import queue
 import threading
+import queue
 
-if not INTERNAL:
-    import cv2  # pylint: disable=g-import-not-at-top
+import cv2  # pylint: disable=g-import-not-at-top
 import numpy as np
 from PIL import Image
-from tqdm import tqdm
 
 from torchnerf.nerf import utils
 
@@ -169,7 +166,7 @@ class Dataset(threading.Thread):
     # TODO(bydeng): Swap this function with a more flexible camera model.
     def _generate_rays(self):
         """Generating rays for all images."""
-        print(' Generating rays')
+        # print(' Generating rays')
         self.rays = utils.generate_rays(self.w, self.h, self.focal, self.camtoworlds)
 
 
@@ -181,13 +178,13 @@ class Blender(Dataset):
         if args.render_path:
             raise ValueError("render_path cannot be used for the blender dataset.")
         with utils.open_file(
-            path.join(args.data_dir, "transforms_{}.json".format(self.split)), "r"
+            os.path.join(args.data_dir, "transforms_{}.json".format(self.split)), "r"
         ) as fp:
             meta = json.load(fp)
         images = []
         cams = []
-        print(' Load Blender', args.data_dir, 'split', self.split)
-        for i in tqdm(range(len(meta["frames"]))):
+        # print(' Load Blender', args.data_dir, 'split', self.split)
+        for i in range(len(meta["frames"])):
             frame = meta["frames"][i]
             fname = os.path.join(args.data_dir, frame["file_path"] + ".png")
             with utils.open_file(fname, "rb") as imgin:
@@ -223,7 +220,7 @@ class LLFF(Dataset):
 
     def _load_renderings(self, args):
         """Load images from disk."""
-        args.data_dir = path.expanduser(args.data_dir)
+        args.data_dir = os.path.expanduser(args.data_dir)
         print(' Load LLFF', args.data_dir, 'split', self.split)
         # Load images.
         imgdir_suffix = ""
@@ -232,11 +229,11 @@ class LLFF(Dataset):
             factor = args.factor
         else:
             factor = 1
-        imgdir = path.join(args.data_dir, "images" + imgdir_suffix)
+        imgdir = os.path.join(args.data_dir, "images" + imgdir_suffix)
         if not utils.file_exists(imgdir):
             raise ValueError("Image folder {} doesn't exist.".format(imgdir))
         imgfiles = [
-            path.join(imgdir, f)
+            os.path.join(imgdir, f)
             for f in sorted(utils.listdir(imgdir))
             if f.endswith("JPG") or f.endswith("jpg") or f.endswith("png")
         ]
@@ -248,7 +245,7 @@ class LLFF(Dataset):
         images = np.stack(images, axis=-1)
 
         # Load poses and bds.
-        with utils.open_file(path.join(args.data_dir, "poses_bounds.npy"), "rb") as fp:
+        with utils.open_file(os.path.join(args.data_dir, "poses_bounds.npy"), "rb") as fp:
             poses_arr = np.load(fp)
         poses = poses_arr[:, :-2].reshape([-1, 3, 5]).transpose([1, 2, 0])
         bds = poses_arr[:, -2:].transpose([1, 0])

@@ -17,9 +17,8 @@
 """Utility functions."""
 import collections
 import os
-from os import path
-from absl import flags
-import math 
+import math
+import argparse
 
 import torch
 import torch.nn.functional as F
@@ -28,10 +27,8 @@ import numpy as np
 from PIL import Image
 import yaml
 from tqdm import tqdm
-from torchnerf.nerf import datasets
 
 BASE_DIR = "torchnerf"
-INTERNAL = False
 
 
 class TrainState:
@@ -68,155 +65,150 @@ def namedtuple_map(fn, tup):
 
 def define_flags():
     """Define flags for both training and evaluation modes."""
-    flags.DEFINE_string("train_dir", None, "where to store ckpts and logs")
-    flags.DEFINE_string("data_dir", None, "input data directory.")
-    flags.DEFINE_string("config", None, "using config files to set hyperparameters.")
+    parser = argparse.ArgumentParser(description='TorchNeRF.')
+    parser.add_argument(
+        "--train_dir", type=str, default=None,
+        help="where to store ckpts and logs")
+    parser.add_argument(
+        "--data_dir", type=str, default=None,
+        help="input data directory.")
+    parser.add_argument(
+        "--config", type=str, default=None,
+        help="using config files to set hyperparameters.")
 
     # Dataset Flags
-    # TODO(pratuls): rename to dataset_loader and consider cleaning up
-    flags.DEFINE_enum(
-        "dataset",
-        "blender",
-        list(k for k in datasets.dataset_dict.keys()),
-        "The type of dataset feed to nerf.",
+    parser.add_argument(
+        "--dataset", type=str, default="blender", choices=["blender", "llff"],
+        help="The type of dataset feed to nerf.")
+    parser.add_argument(
+        "--image_batching", type=bool, default=False,
+        help="sample rays in a batch from different images.")
+    parser.add_argument(
+        "--white_bkgd", type=bool, default=True,
+        help="using white color as default background. (used in the blender dataset only)")
+    parser.add_argument(
+        "--batch_size", type=int, default=1024,
+        help="the number of rays in a mini-batch (for training).")
+    parser.add_argument(
+        "--factor", type=int, default=4,
+        help="the downsample factor of images, 0 for no downsample.")
+    parser.add_argument(
+        "--spherify", type=bool, default=False,
+        help="set for spherical 360 scenes.")
+    parser.add_argument(
+        "--render_path", type=bool, default=False,
+        help="render generated path if set true. (used in the llff dataset only)",
     )
-    flags.DEFINE_bool(
-        "image_batching", False, "sample rays in a batch from different images."
-    )
-    flags.DEFINE_bool(
-        "white_bkgd",
-        True,
-        "using white color as default background." "(used in the blender dataset only)",
-    )
-    flags.DEFINE_integer(
-        "batch_size", 1024, "the number of rays in a mini-batch (for training)."
-    )
-    flags.DEFINE_integer(
-        "factor", 4, "the downsample factor of images, 0 for no downsample."
-    )
-    flags.DEFINE_bool("spherify", False, "set for spherical 360 scenes.")
-    flags.DEFINE_bool(
-        "render_path",
-        False,
-        "render generated path if set true." "(used in the llff dataset only)",
-    )
-    flags.DEFINE_integer(
-        "llffhold",
-        8,
-        "will take every 1/N images as LLFF test set."
-        "(used in the llff dataset only)",
+    parser.add_argument(
+        "--llffhold", type=int, default=8,
+        help="will take every 1/N images as LLFF test set. (used in the llff dataset only)",
     )
 
     # Model Flags
-    flags.DEFINE_string("model", "nerf", "name of model to use.")
-    flags.DEFINE_float("near", 2.0, "near clip of volumetric rendering.")
-    flags.DEFINE_float("far", 6.0, "far clip of volumentric rendering.")
-    flags.DEFINE_integer("net_depth", 8, "depth of the first part of MLP.")
-    flags.DEFINE_integer("net_width", 256, "width of the first part of MLP.")
-    flags.DEFINE_integer("net_depth_condition", 1, "depth of the second part of MLP.")
-    flags.DEFINE_integer("net_width_condition", 128, "width of the second part of MLP.")
-    flags.DEFINE_float("weight_decay_mult", 0, "The multiplier on weight decay")
-    flags.DEFINE_integer(
-        "skip_layer",
-        4,
-        "add a skip connection to the output vector of every" "skip_layer layers.",
-    )
-    flags.DEFINE_integer("num_rgb_channels", 3, "the number of RGB channels.")
-    flags.DEFINE_integer("num_sigma_channels", 1, "the number of density channels.")
-    flags.DEFINE_bool("randomized", True, "use randomized stratified sampling.")
-    flags.DEFINE_integer(
-        "min_deg_point", 0, "Minimum degree of positional encoding for points."
-    )
-    flags.DEFINE_integer(
-        "max_deg_point", 10, "Maximum degree of positional encoding for points."
-    )
-    flags.DEFINE_integer("deg_view", 4, "Degree of positional encoding for viewdirs.")
-    flags.DEFINE_integer(
-        "num_coarse_samples",
-        64,
-        "the number of samples on each ray for the coarse model.",
-    )
-    flags.DEFINE_integer(
-        "num_fine_samples", 128, "the number of samples on each ray for the fine model."
-    )
-    flags.DEFINE_bool("use_viewdirs", True, "use view directions as a condition.")
-    flags.DEFINE_integer("sh_order", -1, "set to use spherical harmonics output of given order.")
-    flags.DEFINE_float(
-        "noise_std",
-        None,
-        "std dev of noise added to regularize sigma output."
-        "(used in the llff dataset only)",
-    )
-    flags.DEFINE_bool(
-        "lindisp", False, "sampling linearly in disparity rather than depth."
-    )
-    flags.DEFINE_string(
-        "net_activation", "ReLU", "activation function used within the MLP."
-    )
-    flags.DEFINE_string(
-        "rgb_activation", "Sigmoid", "activation function used to produce RGB."
-    )
-    flags.DEFINE_string(
-        "sigma_activation", "ReLU", "activation function used to produce density."
-    )
-    flags.DEFINE_bool(
-        "legacy_posenc_order",
-        False,
-        "If True, revert the positional encoding feature order to an older version of this codebase.",
+    parser.add_argument(
+        "--model", type=str, default="nerf", help="name of model to use.")
+    parser.add_argument(
+        "--near", type=float, default=2.0, help="near clip of volumetric rendering.")
+    parser.add_argument(
+        "--far", type=float, default=6.0, help="far clip of volumentric rendering.")
+    parser.add_argument(
+        "--net_depth", type=int, default=8, help="depth of the first part of MLP.")
+    parser.add_argument(
+        "--net_width", type=int, default=256, help="width of the first part of MLP.")
+    parser.add_argument(
+        "--net_depth_condition", type=int, default=1, help="depth of the second part of MLP.")
+    parser.add_argument(
+        "--net_width_condition", type=int, default=128, help="width of the second part of MLP.")
+    parser.add_argument(
+        "--weight_decay_mult", type=float, default=0., help="The multiplier on weight decay")
+    parser.add_argument(
+        "--skip_layer", type=int, default=4,
+        help="add a skip connection to the output vector of every skip_layer layers.")
+    parser.add_argument(
+        "--num_rgb_channels", type=int, default=3, help="the number of RGB channels.")
+    parser.add_argument(
+        "--num_sigma_channels", type=int, default=1, help="the number of density channels.")
+    parser.add_argument(
+        "--randomized", type=int, default=True, help="use randomized stratified sampling.")
+    parser.add_argument(
+        "--min_deg_point", type=int, default=0,
+        help="Minimum degree of positional encoding for points.")
+    parser.add_argument(
+        "--max_deg_point", type=int, default=10,
+        help="Maximum degree of positional encoding for points.")
+    parser.add_argument(
+        "--deg_view", type=int, default=4, help="Degree of positional encoding for viewdirs.")
+    parser.add_argument(
+        "--num_coarse_samples", type=int, default=64,
+        help="the number of samples on each ray for the coarse model.")
+    parser.add_argument(
+        "--num_fine_samples", type=int, default=128,
+        help="the number of samples on each ray for the fine model.")
+    parser.add_argument(
+        "--use_viewdirs", type=bool, default=True, help="use view directions as a condition.")
+    parser.add_argument(
+        "--sh_order", type=int, default=-1,
+        help="set to use spherical harmonics output of given order.")
+    parser.add_argument(
+        "--noise_std", type=float, default=None,
+        help="std dev of noise added to regularize sigma output. (used in the llff dataset only)")
+    parser.add_argument(
+        "--lindisp", type=bool, default=False,
+        help="sampling linearly in disparity rather than depth.")
+    parser.add_argument(
+        "--net_activation", type=str, default="ReLU",
+        help="activation function used within the MLP.")
+    parser.add_argument(
+        "--rgb_activation", type=str, default="Sigmoid",
+        help="activation function used to produce RGB.")
+    parser.add_argument(
+        "--sigma_activation", type=str, default="ReLU",
+        help="activation function used to produce density.")
+    parser.add_argument(
+        "--legacy_posenc_order", type=bool, default=False,
+        help="If True, revert the positional encoding feature order to an older version of this codebase.",
     )
 
     # Train Flags
-    flags.DEFINE_float("lr_init", 5e-4, "The initial learning rate.")
-    flags.DEFINE_float("lr_final", 5e-6, "The final learning rate.")
-    flags.DEFINE_integer(
-        "lr_delay_steps",
-        0,
-        "The number of steps at the beginning of "
-        "training to reduce the learning rate by lr_delay_mult",
-    )
-    flags.DEFINE_float(
-        "lr_delay_mult",
-        1.0,
-        "A multiplier on the learning rate when the step " "is < lr_delay_steps",
-    )
-    flags.DEFINE_integer("max_steps", 1000000, "the number of optimization steps.")
-    flags.DEFINE_integer(
-        "save_every", 5000, "the number of steps to save a checkpoint."
-    )
-    flags.DEFINE_integer(
-        "print_every", 500, "the number of steps between reports to tensorboard."
-    )
-    flags.DEFINE_integer(
-        "render_every",
-        10000,
-        "the number of steps to render a test image,"
-        "better to be x00 for accurate step time record.",
-    )
-    # flags.DEFINE_integer(
-    #     "gc_every", 10000, "the number of steps to run python garbage collection."
-    # )
+    parser.add_argument(
+        "--lr_init", type=float, default=5e-4, help="The initial learning rate.")
+    parser.add_argument(
+        "--lr_final", type=float, default=5e-6, help="The final learning rate.")
+    parser.add_argument(
+        "--lr_delay_steps", type=int, default=0,
+        help="The number of steps at the beginning of training to reduce the learning rate by lr_delay_mult")
+    parser.add_argument(
+        "--lr_delay_mult", type=float, default=1.0,
+        help="A multiplier on the learning rate when the step is < lr_delay_steps")
+    parser.add_argument(
+        "--max_steps", type=int, default=1000000, help="the number of optimization steps.")
+    parser.add_argument(
+        "--save_every", type=int, default=5000, help="the number of steps to save a checkpoint.")
+    parser.add_argument(
+        "--print_every", type=int, default=500, help="the number of steps between reports to tensorboard.")
+    parser.add_argument(
+        "--render_every", type=int, default=10000,
+        help="the number of steps to render a test image better to be x00 for accurate step time record.")
 
     # Eval Flags
-    flags.DEFINE_bool(
-        "eval_once",
-        True,
-        "evaluate the model only once if true, otherwise keeping evaluating new"
-        "checkpoints if there's any.",
+    parser.add_argument(
+        "--eval_once", type=bool, default=True,
+        help="evaluate the model only once if true, otherwise keeping evaluating new checkpoints if there's any.",
     )
-    flags.DEFINE_bool("save_output", True, "save predicted images to disk if True.")
-    flags.DEFINE_integer(
-        "chunk",
-        8192,
-        "the size of chunks for evaluation inferences, set to the value that"
-        "fits your GPU/TPU memory.",
-    )
+    parser.add_argument(
+        "--save_output", type=bool, default=True, help="save predicted images to disk if True.")
+    parser.add_argument(
+        "--chunk", type=int, default=8192,
+        help="the size of chunks for evaluation inferences, set to the value that"
+        "fits your GPU/TPU memory.")
+    return parser.parse_args()
 
 
 def update_flags(args):
     """Update the flags in `args` with the contents of the config YAML file."""
     if args.config is None:
         return
-    pth = path.join(BASE_DIR, args.config + ".yaml")
+    pth = os.path.join(BASE_DIR, args.config + ".yaml")
     with open_file(pth, "r") as fin:
         configs = yaml.load(fin, Loader=yaml.FullLoader)
     # Only allow args to be updated if they already exist.
@@ -241,29 +233,24 @@ def set_random_seed(seed):
 
 
 def open_file(pth, mode="r"):
-    if not INTERNAL:
-        pth = path.expanduser(pth)
-        return open(pth, mode=mode)
+    pth = os.path.expanduser(pth)
+    return open(pth, mode=mode)
 
 
 def file_exists(pth):
-    if not INTERNAL:
-        return path.exists(pth)
+    return os.path.exists(pth)
 
 
 def listdir(pth):
-    if not INTERNAL:
-        return os.listdir(pth)
+    return os.listdir(pth)
 
 
 def isdir(pth):
-    if not INTERNAL:
-        return path.isdir(pth)
+    return os.path.isdir(pth)
 
 
 def makedirs(pth):
-    if not INTERNAL:
-        os.makedirs(pth, exist_ok=True)
+    os.makedirs(pth, exist_ok=True)
 
 
 @torch.no_grad()
@@ -382,7 +369,7 @@ def compute_ssim(
     img0 = img0.view(-1, width, height, num_channels).permute(0, 3, 1, 2)
     img1 = img1.view(-1, width, height, num_channels).permute(0, 3, 1, 2)
     batch_size = img0.shape[0]
-    
+
     # Construct a 1D Gaussian blur filter.
     hw = filter_size // 2
     shift = (2 * hw - filter_size + 1) / 2
@@ -393,10 +380,10 @@ def compute_ssim(
     # Blur in x and y (faster than the 2D convolution).
     # z is a tensor of size [B, H, W, C]
     filt_fn1 = lambda z: F.conv2d(
-        z, filt.view(1, 1, -1, 1).repeat(num_channels, 1, 1, 1), 
+        z, filt.view(1, 1, -1, 1).repeat(num_channels, 1, 1, 1),
         padding=[hw, 0], groups=num_channels)
     filt_fn2 = lambda z: F.conv2d(
-        z, filt.view(1, 1, 1, -1).repeat(num_channels, 1, 1, 1), 
+        z, filt.view(1, 1, 1, -1).repeat(num_channels, 1, 1, 1),
         padding=[0, hw], groups=num_channels)
 
     # Vmap the blurs to the tensor size, and then compose them.
@@ -636,3 +623,9 @@ def get_eval_points_pfn(model, raw_rgb, coarse=False):
     def eval_points_fn(points, viewdirs):
         return eval_method(points, viewdirs, coarse=coarse)
     return eval_points_fn
+
+
+if __name__ == "__main__":
+    args = define_flags()
+    update_flags(args)
+    print (args)

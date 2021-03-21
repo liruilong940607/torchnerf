@@ -21,24 +21,20 @@ import os
 import functools
 import gc
 import time
-from absl import app
-from absl import flags
 
 import numpy as np
 import torch
+import torch.multiprocessing as mp
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.utils.tensorboard import SummaryWriter
 
 from torchnerf.nerf import datasets
 from torchnerf.nerf import models
 from torchnerf.nerf import utils
 
-FLAGS = flags.FLAGS
 
-utils.define_flags()
-
-device = "cuda" if torch.cuda.is_available() else "cpu"
-torch.autograd.set_detect_anomaly(True)
-
-def train_step(model, state, batch, lr):
+def train_step(model, state, batch, lr, device, args):
     """One optimization step.
     Args:
       model: The linen model.
@@ -53,7 +49,7 @@ def train_step(model, state, batch, lr):
         batch["pixels"] = torch.from_numpy(batch["pixels"]).to(device)
         rays = utils.namedtuple_map(
             lambda z: torch.from_numpy(z).to(device), batch["rays"])
-        ret = model(rays, FLAGS.randomized)
+        ret = model(rays, args.randomized)
         if len(ret) not in (1, 2):
             raise ValueError(
                 "ret should contain either 1 set of output (coarse only), or 2 sets"
@@ -87,55 +83,64 @@ def train_step(model, state, batch, lr):
     state.optimizer.step()
     state.step += 1
 
-    return state, stats 
+    return state, stats
 
 
-def main(unused_argv):
-    utils.set_random_seed(20210222)
+def main(local_rank, args):
+    def print0(*strs):
+        print(*strs) if local_rank is 0 else None
 
-    utils.update_flags(FLAGS)
-    utils.check_flags(FLAGS, require_batch_size_div=False)
+    print ("local_rank:", local_rank, "world_size:", args.world_size)
+    dist.init_process_group(
+    	backend='nccl',
+        init_method='tcp://127.0.0.1:8686',
+    	world_size=args.world_size,
+    	rank=local_rank
+    )
 
-    utils.makedirs(FLAGS.train_dir)
-    render_dir = os.path.join(FLAGS.train_dir, 'render')
-    utils.makedirs(render_dir)
+    device = f"cuda:{local_rank}"
+    utils.set_random_seed(20210222 + local_rank)
 
-    print('* Load train data')
-    dataset = datasets.get_dataset("train", FLAGS)
-    print('* Load test data')
-    test_dataset = datasets.get_dataset("test", FLAGS)
-    print('* Load model')
-    model, state = models.get_model_state(FLAGS, device=device, restore=True)
+    print0('* Load train data')
+    dataset = datasets.get_dataset("train", args)
+    print0('* Load test data')
+    test_dataset = datasets.get_dataset("test", args)
+    print0('* Load model')
+    model, state = models.get_model_state(args, device=device, restore=True)
+    model = DDP(model, device_ids=[local_rank])
+    print0('* Done loading model')
 
     learning_rate_fn = functools.partial(
         utils.learning_rate_decay,
-        lr_init=FLAGS.lr_init,
-        lr_final=FLAGS.lr_final,
-        max_steps=FLAGS.max_steps,
-        lr_delay_steps=FLAGS.lr_delay_steps,
-        lr_delay_mult=FLAGS.lr_delay_mult,
+        lr_init=args.lr_init,
+        lr_final=args.lr_final,
+        max_steps=args.max_steps,
+        lr_delay_steps=args.lr_delay_steps,
+        lr_delay_mult=args.lr_delay_mult,
     )
 
-    render_pfn = utils.get_render_pfn(model, randomized=FLAGS.randomized)
+    render_pfn = utils.get_render_pfn(model, randomized=args.randomized)
     ssim_fn = functools.partial(utils.compute_ssim, max_val=1.0)
 
     # Resume training step of the last checkpoint.
     init_step = state.step + 1
-    summary_writer = torch.utils.tensorboard.SummaryWriter(FLAGS.train_dir)
+    if local_rank == 0:
+        summary_writer = SummaryWriter(args.train_dir)
 
     stats_trace = []
     reset_timer = True
-    for step, batch in zip(range(init_step, FLAGS.max_steps + 1), dataset):
+    for step, batch in zip(range(init_step, args.max_steps + 1), dataset):
         model.train()
         if reset_timer:
             t_loop_start = time.time()
             reset_timer = False
         lr = learning_rate_fn(step)
-        state, stats = train_step(model, state, batch, lr)
-        stats_trace.append(stats)
+        state, stats = train_step(model, state, batch, lr, device, args)
+        if local_rank == 0:
+            stats_trace.append(stats)
 
         # Log training summaries.
-        if step % FLAGS.print_every == 0:
+        if local_rank == 0 and step % args.print_every == 0:
             summary_writer.add_scalar("train_loss", stats.loss.item(), step)
             summary_writer.add_scalar("train_psnr", stats.psnr.item(), step)
             summary_writer.add_scalar("train_loss_coarse", stats.loss_c.item(), step)
@@ -146,44 +151,44 @@ def main(unused_argv):
             summary_writer.add_scalar("train_avg_loss", avg_loss.item(), step)
             summary_writer.add_scalar("train_avg_psnr", avg_psnr.item(), step)
             summary_writer.add_scalar("learning_rate", lr, step)
-            steps_per_sec = FLAGS.print_every / (time.time() - t_loop_start)
+            steps_per_sec = args.print_every / (time.time() - t_loop_start)
             reset_timer = True
-            rays_per_sec = FLAGS.batch_size * steps_per_sec
+            rays_per_sec = args.batch_size * steps_per_sec * args.world_size
             summary_writer.add_scalar("train_steps_per_sec", steps_per_sec, step)
             summary_writer.add_scalar("train_rays_per_sec", rays_per_sec, step)
-            precision = int(np.ceil(np.log10(FLAGS.max_steps))) + 1
-            print(
+            precision = int(np.ceil(np.log10(args.max_steps))) + 1
+            print0(
                 ("{:" + "{:d}".format(precision) + "d}").format(step)
-                + f"/{FLAGS.max_steps:d}: "
+                + f"/{args.max_steps:d}: "
                 + f"i_loss={stats.loss.item():0.4f}, "
                 + f"avg_loss={avg_loss.item():0.4f}, "
                 + f"lr={lr:0.2e}, "
                 + f"{rays_per_sec:0.0f} rays/sec"
             )
-        if step % FLAGS.save_every == 0:
-            print('* Saving')
+        if local_rank == 0 and step % args.save_every == 0:
+            print0('* Saving')
             torch.save({
                 'step': state.step,
                 'model': model.state_dict(),
                 'optimizer': state.optimizer.state_dict(),
-            }, os.path.join(FLAGS.train_dir, f"step-{step:09d}.ckpt"))
+            }, os.path.join(args.train_dir, f"step-{step:09d}.ckpt"))
 
         # Test-set evaluation.
-        if FLAGS.render_every > 0 and step % FLAGS.render_every == 0:
+        if local_rank == 0 and args.render_every > 0 and step % args.render_every == 0:
             model.eval()
-            print('\n* Rendering')
+            print0('\n* Rendering')
             t_eval_start = time.time()
             test_case = next(test_dataset)
             gt_color = torch.from_numpy(test_case["pixels"]).to(device)
             rays = utils.namedtuple_map(
                 lambda z: torch.from_numpy(z.copy()).to(device), test_case["rays"])
-            
+
             with torch.no_grad():
                 pred_color, pred_disp, pred_acc = utils.render_image(
                     render_pfn,
                     rays,
-                    FLAGS.dataset == "llff",
-                    chunk=FLAGS.chunk,
+                    args.dataset == "llff",
+                    chunk=args.chunk,
                 )
                 psnr = utils.compute_psnr(
                     ((pred_color - gt_color) ** 2).mean()
@@ -194,7 +199,7 @@ def main(unused_argv):
             num_rays = np.prod(np.array(rays.directions.size()[:-1]))
             rays_per_sec = num_rays / eval_time
             summary_writer.add_scalar("test_rays_per_sec", rays_per_sec, step)
-            print(f"Eval {step}: {eval_time:0.3f}s., {rays_per_sec:0.0f} rays/sec")
+            print0(f"Eval {step}: {eval_time:0.3f}s., {rays_per_sec:0.0f} rays/sec")
             summary_writer.add_scalar("test_psnr", psnr.item(), step)
             summary_writer.add_scalar("test_ssim", ssim.item(), step)
 
@@ -208,7 +213,7 @@ def main(unused_argv):
                         np.repeat(pred_acc, 3, axis=-1)]
             out_path = os.path.join(render_dir, '{:010}.png'.format(step))
             utils.save_img(np.hstack(vis_list), out_path)
-            print(' Rendering saved to ', out_path)
+            print0(' Rendering saved to ', out_path)
 
             # I am saving rendering to disk instead of Tensorboard
             # Since Tensorboard begins to load very slowly when it has many images
@@ -217,15 +222,29 @@ def main(unused_argv):
             #  summary_writer.image("test_pred_acc", pred_acc, step)
             #  summary_writer.image("test_target", test_case["pixels"], step)
 
-    if FLAGS.max_steps % FLAGS.save_every != 0:
-        print('* Saving')
+    if local_rank == 0 and args.max_steps % args.save_every != 0:
+        print0('* Saving')
         torch.save({
             'step': state.step,
             'model': model.state_dict(),
             'optimizer': state.optimizer.state_dict(),
-        }, os.path.join(FLAGS.train_dir, f"step-{step:09d}.ckpt"))
+        }, os.path.join(args.train_dir, f"step-{step:09d}.ckpt"))
 
 
 
 if __name__ == "__main__":
-    app.run(main)
+    args = utils.define_flags()
+    args.render_dir = os.path.join(args.train_dir, 'render')
+    args.world_size = torch.cuda.device_count()
+
+    utils.update_flags(args)
+    utils.check_flags(args, require_batch_size_div=False)
+
+    utils.makedirs(args.train_dir)
+    utils.makedirs(args.render_dir)
+
+    os.environ['MASTER_ADDR'] = '127.0.0.1'
+    os.environ['MASTER_PORT'] = '12321'
+    mp.spawn(main, nprocs=args.world_size, args=(args,), daemon=False)
+
+
