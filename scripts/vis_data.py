@@ -4,8 +4,7 @@ import numpy as np
 
 
 def plot_multiview(intrinsics, extrinsics, images,
-                   ray_subsample=1./200, ray_near=0, ray_far=500,
-                   image_dist=100):
+                   ray_subsample=1./200, ray_near=0, ray_far=500):
     """Plot NeRF data in 3D: multiview images with cameras.
 
     Args:
@@ -21,14 +20,16 @@ def plot_multiview(intrinsics, extrinsics, images,
 
     vis_list = []
     for intrin, extrin, image in zip(intrinsics, extrinsics, images):
-        vis_list += plot_camera(intrin, extrin)
+        vis_list += plot_camera(intrin, extrin,
+                                axis_size=(ray_far-ray_near)/10.)
         vis_list += plot_rays(intrin, extrin, image.shape[0], image.shape[1],
                               ray_subsample, ray_near, ray_far)
-        vis_list += plot_image(intrin, extrin, image, image_dist)
+        vis_list += plot_image(intrin, extrin, image,
+                               dist=(ray_far-ray_near)/2.)
     vedo.show(*vis_list, interactive=True)
 
 
-def plot_camera(intrinsic, extrinsic):
+def plot_camera(intrinsic, extrinsic, axis_size=40.):
     """Plot a camera in 3D with view direction.
 
     Args:
@@ -38,9 +39,9 @@ def plot_camera(intrinsic, extrinsic):
         list of vedo objs to be plotted.
     """
     points_world = np.array([
-        [40., 0., 0.],  # arrow x: red
-        [0., 40., 0.],  # arrow y: green
-        [0., 0., 40.],  # arrow z: blue
+        [axis_size, 0., 0.],  # arrow x: red
+        [0., axis_size, 0.],  # arrow y: green
+        [0., 0., axis_size],  # arrow z: blue
     ])
     colors = ['r', 'g', 'b']
 
@@ -103,8 +104,9 @@ def plot_image(intrinsic, extrinsic, image, dist=100):
 
     # scale
     img_scale = dist / ((f_x + f_y) / 2)
-    # position: bottom-right corner of the image
-    ray_dir = np.array([image.shape[1], image.shape[0], 1], dtype=np.float32)
+    # [FIXME] position: bottom-right corner of the image
+    # ray_dir = np.array([image.shape[1], image.shape[0], 1], dtype=np.float32)
+    ray_dir = np.array([0, 0, 1], dtype=np.float32)
     ray_dir = np.dot(np.linalg.inv(intrinsic), ray_dir)
     ray_dir = np.dot(np.linalg.inv(rot), ray_dir)
     ray_dir = ray_dir / np.linalg.norm(ray_dir)
@@ -115,7 +117,7 @@ def plot_image(intrinsic, extrinsic, image, dist=100):
 
 
 
-if __name__ == "__main__":
+def run_demo():
     from scipy.spatial.transform import Rotation as R
 
     intrinsic = np.array([
@@ -134,3 +136,59 @@ if __name__ == "__main__":
         images.append(np.zeros((1080, 1920, 3), dtype=np.uint8))
 
     plot_multiview(intrinsic, extrinsics, images)
+
+
+def run_dryice1():
+    from PIL import Image
+    from torchnerf.nerf.extra_data import dryice1
+
+    krtpath = dryice1._DATA_ROOT + "experiments/dryice1/data/KRT"
+    krt = dryice1.load_krt(krtpath)
+
+    # transformation that places the center of the object at the origin
+    worldscale = 1.0
+    transfpath = dryice1._DATA_ROOT + "experiments/dryice1/data/pose.txt"
+    transf = np.genfromtxt(transfpath, dtype=np.float32, skip_footer=2)
+    transf[:3, :3] *= worldscale
+
+    frame = 15469
+    cameras = sorted(list(krt.keys()))
+
+    intrinsics = []
+    extrinsics = []
+    images = []
+    for cam in cameras:
+        intrinsics.append(krt[cam]["intrin"])
+        intrinsics[-1][:2, :] /= 4.  # images are downscaled
+        extrinsics.append(krt[cam]["extrin"])
+        imagepath = (
+            dryice1._DATA_ROOT + "experiments/dryice1/data/cam{}/image{:04}.jpg"
+            .format(cam, int(frame)))
+        image = np.asarray(Image.open(imagepath), dtype=np.float32)
+        images.append(image)
+        # break
+    plot_multiview(intrinsics, extrinsics, images)
+
+
+def run_nerf():
+    from torchnerf.nerf.datasets import get_dataset
+    from torchnerf.nerf import utils
+
+    FLAGS = utils.define_flags()
+    dataset = get_dataset("train", FLAGS)
+
+    intrinsic = np.array([
+        [dataset.focal, 0, dataset.w / 2.0],
+        [0, dataset.focal, dataset.h / 2.0],
+        [0, 0, 1]
+    ], dtype=np.float32)
+    extrinsics = [np.linalg.inv(m)[:3, :] for m in dataset.camtoworlds]
+    images = dataset.images.reshape(-1, dataset.h, dataset.w, 3)
+
+    plot_multiview(intrinsic, extrinsics[::10], images[::10], ray_far=10.0)
+
+
+if __name__ == "__main__":
+    # run_demo()
+    # run_dryice1()
+    run_nerf()
