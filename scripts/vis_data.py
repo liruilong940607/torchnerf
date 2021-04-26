@@ -24,8 +24,8 @@ def plot_multiview(intrinsics, extrinsics, images,
                                 axis_size=(ray_far-ray_near)/10.)
         vis_list += plot_rays(intrin, extrin, image.shape[0], image.shape[1],
                               ray_subsample, ray_near, ray_far)
-        vis_list += plot_image(intrin, extrin, image,
-                               dist=(ray_far-ray_near)/2.)
+        # vis_list += plot_image(intrin, extrin, image,
+        #                        dist=(ray_far-ray_near)/2.)
     vedo.show(*vis_list, interactive=True)
 
 
@@ -105,8 +105,8 @@ def plot_image(intrinsic, extrinsic, image, dist=100):
     # scale
     img_scale = dist / ((f_x + f_y) / 2)
     # [FIXME] position: bottom-right corner of the image
-    # ray_dir = np.array([image.shape[1], image.shape[0], 1], dtype=np.float32)
-    ray_dir = np.array([0, 0, 1], dtype=np.float32)
+    ray_dir = np.array([image.shape[1], image.shape[0], 1], dtype=np.float32)
+    # ray_dir = np.array([0, 0, 1], dtype=np.float32)
     ray_dir = np.dot(np.linalg.inv(intrinsic), ray_dir)
     ray_dir = np.dot(np.linalg.inv(rot), ray_dir)
     ray_dir = ray_dir / np.linalg.norm(ray_dir)
@@ -182,10 +182,12 @@ def run_nerf():
         [0, dataset.focal, dataset.h / 2.0],
         [0, 0, 1]
     ], dtype=np.float32)
-    extrinsics = [np.linalg.inv(m)[:3, :] for m in dataset.camtoworlds]
+    Rs = [np.linalg.inv(m)[:3, :3] for m in dataset.camtoworlds]
+    Ts = [np.matmul(R, m[:3, 3:4]) for m, R in zip(dataset.camtoworlds, Rs)]
+    extrinsics = [np.concatenate([R, T], axis=1) for R, T in zip(Rs, Ts)]
     images = dataset.images.reshape(-1, dataset.h, dataset.w, 3)
 
-    plot_multiview(intrinsic, extrinsics[::10], images[::10], ray_far=10.0)
+    plot_multiview(intrinsic, extrinsics[::10], images[::10], ray_far=6.0)
 
 
 if __name__ == "__main__":

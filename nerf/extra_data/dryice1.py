@@ -10,7 +10,7 @@ from PIL import Image
 
 import torch.utils.data
 
-_DATA_ROOT = '/home/ruilongli/data/NeuralVol/'
+_DATA_ROOT = '/mnt/data/NeuralVol/'
 
 
 def get_dataset(camerafilter=lambda x: True, maxframes=-1, subsampletype=None):
